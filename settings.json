@@ -1,0 +1,8 @@
+{
+  "userConfig": {
+    "workspaces_root": {
+      "description": "Root directory containing your client workspaces (e.g., ~/repos or C:\\repos)",
+      "sensitive": false
+    }
+  }
+}
