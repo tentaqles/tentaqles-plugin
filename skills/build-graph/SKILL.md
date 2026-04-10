@@ -1,18 +1,73 @@
 ---
 name: build-graph
-description: Build a knowledge graph from the current workspace using graphify, then embed all nodes for semantic search. Use when the user wants to analyze codebase structure.
+description: Build a knowledge graph from the current workspace and embed all nodes for semantic search. Supports two engines — graphify (external) or native (built-in). Use when the user wants to analyze codebase structure, map architecture, understand relationships between files/modules, or says "build graph", "map the codebase", "analyze this project".
 ---
 
 # Build Knowledge Graph
 
-1. Run `/graphify` on the current directory to build the knowledge graph
-2. After the graph is built, embed all nodes for semantic search:
+Build a knowledge graph from the current directory, then embed all nodes for semantic search across sessions.
+
+## Check Engine Availability
+
 ```bash
 python -c "
-import sys; sys.path.insert(0, '${CLAUDE_PLUGIN_ROOT}')
-from tentaqles.embeddings.graphify_hook import embed_graph
-result = embed_graph('graphify-out/graph.json')
-print(f'Embedded {result[\"nodes_embedded\"]} nodes ({result[\"file_size_kb\"]} KB)')
+import sys, os
+sys.path.insert(0, os.environ.get('CLAUDE_PLUGIN_ROOT', '.'))
+from tentaqles.graph import get_engine
+try:
+    engine = get_engine()
+    print(f'Engine: {engine.name}')
+except RuntimeError as e:
+    print(f'ERROR: {e}')
 "
 ```
-3. Tell the user they can now use `/tentaqles:query-memory` for semantic search
+
+If no engine is available, tell the user their options:
+- `pip install graphifyy` — uses the graphify package (recommended, most mature)
+- `pip install tentaqles[graph]` — uses the native Tentaqles engine (built-in, includes all enhancements)
+
+## Build the Graph
+
+**If using graphify engine**: Run `/graphify` on the current directory. The graphify skill handles the full pipeline (detection, AST extraction, semantic extraction with subagents, clustering, reporting, HTML visualization). After it completes, continue to the embedding step below.
+
+**If using native engine**:
+
+```bash
+python -c "
+import sys, os
+sys.path.insert(0, os.environ.get('CLAUDE_PLUGIN_ROOT', '.'))
+from tentaqles.graph import get_engine
+from pathlib import Path
+
+engine = get_engine()
+result = engine.build(Path(os.getcwd()))
+print(f'Graph built: {result.get(\"nodes\", 0)} nodes, {result.get(\"edges\", 0)} edges, {result.get(\"communities\", 0)} communities')
+print(f'Output: {result.get(\"output_dir\", \"graphify-out/\")}')
+"
+```
+
+## Embed Nodes for Semantic Search
+
+After the graph is built (by either engine), embed all nodes:
+
+```bash
+python -c "
+import sys, os
+sys.path.insert(0, os.environ.get('CLAUDE_PLUGIN_ROOT', '.'))
+from tentaqles.graph import get_engine
+
+engine = get_engine()
+result = engine.embed('graphify-out/graph.json')
+print(f'Embedded {result[\"nodes_embedded\"]} nodes ({result[\"file_size_kb\"]} KB)')
+print('Semantic search is now active for /tentaqles:query-memory')
+"
+```
+
+## Report
+
+Tell the user:
+- How many nodes, edges, communities were found
+- Where the outputs are (graphify-out/)
+- That semantic search is now active
+- Suggest: "Try `/tentaqles:query-memory` to search the graph by meaning"
+- If GRAPH_REPORT.md exists, highlight the God Nodes and Surprising Connections sections

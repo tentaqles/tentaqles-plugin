@@ -18,6 +18,32 @@ dependencies = [
 
 [project.optional-dependencies]
 graphify = ["graphifyy"]
+graph = [
+    "networkx",
+    "tree-sitter>=0.23.0",
+    "tree-sitter-python",
+    "tree-sitter-javascript",
+    "tree-sitter-typescript",
+    "tree-sitter-go",
+    "tree-sitter-rust",
+    "tree-sitter-java",
+    "tree-sitter-c",
+    "tree-sitter-cpp",
+    "tree-sitter-ruby",
+    "tree-sitter-c-sharp",
+    "tree-sitter-kotlin",
+    "tree-sitter-scala",
+    "tree-sitter-php",
+    "tree-sitter-swift",
+    "tree-sitter-lua",
+    "pathspec",
+]
+docling = ["docling"]
+all = [
+    "graphifyy",
+    "networkx",
+    "docling",
+]
 
 [project.scripts]
 tentaqles = "tentaqles.cli:main"
