@@ -4,9 +4,8 @@ Implements the same GraphEngine interface as graphify_backend but uses
 the native modules in tentaqles.graph.native.* instead of the external
 graphify package.
 
-Status: SKELETON — modules are being ported incrementally from the
-patched graphify installation. Each module below documents what it needs
-from the original graphify source and what Tentaqles enhancements it includes.
+All modules fully ported from the patched graphify installation with
+Tentaqles enhancements built in as first-class code.
 
 Dependencies (declared in pyproject.toml under [graph] extra):
   - networkx            (graph data structure, clustering)
@@ -50,24 +49,12 @@ class NativeEngine(GraphEngine):
             return False
 
     def detect(self, root: Path, **kwargs) -> dict:
-        try:
-            from tentaqles.graph.native.detect import detect
-            return detect(root, **kwargs)
-        except ImportError:
-            raise NotImplementedError(
-                "Native detect module not yet ported. "
-                "Use graph_engine=graphify or run: pip install graphifyy"
-            )
+        from tentaqles.graph.native.detect import detect
+        return detect(root, **kwargs)
 
     def build(self, root: Path, **kwargs) -> dict:
-        try:
-            from tentaqles.graph.native.pipeline import run_pipeline
-            return run_pipeline(root, **kwargs)
-        except ImportError:
-            raise NotImplementedError(
-                "Native build pipeline not yet ported. "
-                "Use graph_engine=graphify or run: pip install graphifyy"
-            )
+        from tentaqles.graph.native.pipeline import run_pipeline
+        return run_pipeline(root, **kwargs)
 
     def query(self, question: str, graph_path: Path, **kwargs) -> str:
         """Query works with any graph.json — engine-agnostic."""
@@ -139,14 +126,8 @@ class NativeEngine(GraphEngine):
         return output
 
     def update(self, root: Path, **kwargs) -> dict:
-        try:
-            from tentaqles.graph.native.detect import detect_incremental
-            result = detect_incremental(root)
-            if result.get("new_total", 0) == 0:
-                return {"status": "no_changes"}
-            return self.build(root, **kwargs)
-        except ImportError:
-            raise NotImplementedError(
-                "Native update not yet ported. "
-                "Use graph_engine=graphify or run: pip install graphifyy"
-            )
+        from tentaqles.graph.native.detect import detect_incremental
+        result = detect_incremental(root)
+        if result.get("new_total", 0) == 0:
+            return {"status": "no_changes"}
+        return self.build(root, **kwargs)
