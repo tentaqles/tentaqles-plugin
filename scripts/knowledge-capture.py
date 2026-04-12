@@ -8,23 +8,20 @@ decision patterns, and records file touches in the memory store.
 Always exits 0 — never blocks the workflow.
 """
 
+import os
+import sys
+
+# Bootstrap sys.path for plugin imports (tentaqles.* + bootstrapped deps)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _path import setup_paths
+setup_paths()
+
 import io
 import json
 import os
 import re
 import sys
 
-# Ensure UTF-8 on Windows
-if sys.platform == "win32":
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
-
-# Add plugin root to sys.path
-plugin_root = os.environ.get(
-    "CLAUDE_PLUGIN_ROOT",
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-)
-sys.path.insert(0, plugin_root)
 
 # Patterns that indicate a decision or discovery worth capturing
 DECISION_PATTERNS = [

@@ -10,6 +10,14 @@ The /tentaqles:session-wrap skill adds richer context (decisions, rationale,
 pending items) when the user explicitly triggers it.
 """
 
+import os
+import sys
+
+# Bootstrap sys.path for plugin imports (tentaqles.* + bootstrapped deps)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _path import setup_paths
+setup_paths()
+
 import json
 import os
 import sys
@@ -17,17 +25,6 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
-# Bootstrap plugin root
-plugin_root = os.environ.get(
-    "CLAUDE_PLUGIN_ROOT",
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-)
-sys.path.insert(0, plugin_root)
-
-# UTF-8 for Windows
-if sys.platform == "win32":
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 
 def parse_transcript(transcript_path: str) -> dict:

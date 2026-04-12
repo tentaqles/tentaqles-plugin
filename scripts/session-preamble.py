@@ -7,6 +7,14 @@ AUTO-SWITCHES identity (gh, git includeIf, az, doctl) to match the
 manifest, runs preflight checks, and outputs combined context to stdout.
 """
 
+import os
+import sys
+
+# Bootstrap sys.path for plugin imports (tentaqles.* + bootstrapped deps)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _path import setup_paths
+setup_paths()
+
 import io
 import json
 import os
@@ -15,17 +23,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-# Ensure UTF-8 stdout on Windows
-if sys.platform == "win32":
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
-
-# Add plugin root to sys.path so tentaqles package is importable
-plugin_root = os.environ.get(
-    "CLAUDE_PLUGIN_ROOT",
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-)
-sys.path.insert(0, plugin_root)
 
 FALLBACK_CONTEXT = "Tentaqles plugin active. No client manifest found for this workspace."
 

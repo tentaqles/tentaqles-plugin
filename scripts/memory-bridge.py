@@ -1,0 +1,178 @@
+#!/usr/bin/env python3
+"""Tentaqles memory bridge — wires hook events into the SQLite MemoryStore.
+
+Called from skills or standalone. Accepts JSON on stdin:
+    {"cwd": "...", "event": "touch|decision|session_start|session_end|pending|context", "data": {...}}
+
+Exits silently on any error to avoid breaking the hook chain.
+"""
+
+import os
+import sys
+
+# Bootstrap sys.path for plugin imports (tentaqles.* + bootstrapped deps)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _path import setup_paths
+setup_paths()
+
+from __future__ import annotations
+
+import json
+import os
+import sys
+
+
+# Also add plugin data dir (where bootstrap installs extra deps)
+plugin_data = os.environ.get("CLAUDE_PLUGIN_DATA", "")
+if plugin_data:
+    sys.path.insert(0, os.path.join(plugin_data, "lib"))
+
+
+def main() -> None:
+    try:
+        raw = sys.stdin.read()
+    except Exception:
+        return
+
+    if not raw.strip():
+        return
+
+    try:
+        payload = json.loads(raw)
+    except (json.JSONDecodeError, ValueError):
+        print(json.dumps({"error": "invalid JSON input"}), file=sys.stderr)
+        return
+
+    cwd = payload.get("cwd", ".")
+    event = payload.get("event", "")
+    data = payload.get("data", {})
+
+    if not event:
+        print(json.dumps({"error": "missing event field"}), file=sys.stderr)
+        return
+
+    manifest = None
+    client_root = cwd
+    client_name = "unknown"
+    try:
+        from tentaqles.manifest.loader import load_manifest
+        manifest = load_manifest(cwd)
+        if manifest:
+            client_root = manifest.get("_client_root", cwd)
+            client_name = manifest.get("client", "unknown")
+    except Exception:
+        pass
+
+    try:
+        from tentaqles.memory.store import MemoryStore
+        store = MemoryStore(client_root)
+    except Exception as exc:
+        print(json.dumps({"error": f"failed to init MemoryStore: {exc}"}), file=sys.stderr)
+        return
+
+    try:
+        _dispatch(event, data, store, manifest, client_root, client_name)
+    except Exception as exc:
+        print(json.dumps({"error": f"event handler failed: {exc}"}), file=sys.stderr)
+    finally:
+        try:
+            store.close()
+        except Exception:
+            pass
+
+
+def _dispatch(
+    event: str,
+    data: dict,
+    store,
+    manifest: dict | None,
+    client_root: str,
+    client_name: str,
+) -> None:
+    """Route event to the appropriate MemoryStore method."""
+
+    if event == "session_start":
+        sid = store.start_session(
+            tags=data.get("tags"),
+            metadata={"client": client_name},
+        )
+        print(json.dumps({"session_id": sid}))
+
+    elif event == "session_end":
+        summary = data.get("summary", "")
+        tags = data.get("tags")
+
+        try:
+            result = store.end_session(summary, tags=tags)
+        except Exception as exc:
+            result = {"error": f"end_session failed: {exc}"}
+
+        try:
+            from tentaqles.memory.meta import MetaMemory
+            meta = MetaMemory()
+            active = store.get_active_nodes(limit=10)
+            stats = store.stats()
+            display = (
+                manifest.get("display_name", client_name) if manifest else client_name
+            )
+            meta.update_workspace(
+                client_name,
+                display,
+                str(client_root),
+                summary,
+                [n["node_id"] for n in active],
+                session_count=stats.get("sessions", 0),
+                total_touches=stats.get("touches", 0),
+            )
+            meta.close()
+        except Exception:
+            pass
+
+        print(json.dumps(result))
+
+    elif event == "touch":
+        store.touch(
+            data.get("node_id", "unknown"),
+            data.get("node_type", "file"),
+            data.get("action", "edit"),
+            data.get("weight", 1.0),
+        )
+
+    elif event == "decision":
+        try:
+            did = store.record_decision(
+                chosen=data.get("chosen", ""),
+                rationale=data.get("rationale", ""),
+                node_ids=data.get("node_ids"),
+                rejected=data.get("rejected"),
+                confidence=data.get("confidence", "medium"),
+                tags=data.get("tags"),
+            )
+            print(json.dumps({"decision_id": did}))
+        except Exception as exc:
+            print(
+                json.dumps({"error": f"record_decision failed: {exc}"}),
+                file=sys.stderr,
+            )
+
+    elif event == "pending":
+        pid = store.add_pending(
+            description=data.get("description", ""),
+            node_ids=data.get("node_ids"),
+            priority=data.get("priority", "medium"),
+        )
+        print(json.dumps({"pending_id": pid}))
+
+    elif event == "context":
+        summary = store.get_context_summary()
+        print(summary)
+
+    else:
+        print(
+            json.dumps({"error": f"unknown event: {event}"}),
+            file=sys.stderr,
+        )
+
+
+if __name__ == "__main__":
+    main()

@@ -16,6 +16,11 @@
         "hooks": [
           {
             "type": "command",
+            "command": "python \"${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap.py\"",
+            "timeout": 600
+          },
+          {
+            "type": "command",
             "command": "python \"${CLAUDE_PLUGIN_ROOT}/scripts/session-preamble.py\""
           }
         ]

@@ -18,12 +18,32 @@ If you freelance, consult, or work across multiple client codebases, Tentaqles s
 
 ```bash
 # From the marketplace
-/plugin marketplace add tentaqles/tentaqles
-/plugin install tentaqles@tentaqles-tentaqles
+/plugin marketplace add tentaqles/tentaqles-plugin
+/plugin install tentaqles-plugin@tentaqles-tentaqles-plugin
 
 # Or test locally
 claude --plugin-dir /path/to/tentaqles-plugin
 ```
+
+### First-run dependencies
+
+On the first session after installing, the plugin's bootstrap hook automatically installs Python dependencies (`pyyaml`, `pathspec`, `fastembed`, `numpy`) into the plugin's data directory (`${CLAUDE_PLUGIN_DATA}/lib`). This is isolated from your system Python and only happens once.
+
+Requirements:
+- **Python 3.10+** on PATH (the plugin runs Python subprocesses)
+- **pip** available (`python -m pip --version`)
+- **git**, and optionally **gh**, **az**, **aws**, **doctl** — whichever CLIs your client manifests use for preflight checks
+
+If the auto-install fails (no network, pip issues, etc.), the plugin runs in degraded mode and prints the manual install command:
+
+```bash
+pip install pyyaml pathspec fastembed numpy
+```
+
+Optional extras:
+- `pip install tentaqles[graph]` — native knowledge graph engine (adds tree-sitter)
+- `pip install graphifyy` — use graphify as the graph engine instead
+- `pip install docling` — rich PPTX/PDF parsing
 
 ### Try the demo
 
