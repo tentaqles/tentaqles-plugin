@@ -51,7 +51,7 @@ Write the manifest file. Map the user's choices to the correct preflight command
 
 | Provider | Preflight command | `expected_user` value |
 |----------|------------------|---------------------|
-| github | `gh auth status --active` | GitHub **username** (e.g. `tentaqles`) — NEVER the email |
+| github | `gh auth status --active` | GitHub **username** (e.g. `alice-dev`) — NEVER the email |
 | gitlab | `glab auth status` | GitLab **username** — NEVER the email |
 | azure-devops | `git config user.email` | (leave `expected_user` unset — use email check only) |
 | azure (cloud) | `az account show --query name -o tsv` | — (use `cloud.expected: {subscription_name}`) |

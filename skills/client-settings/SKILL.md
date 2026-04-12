@@ -34,7 +34,7 @@ Read the `.tentaqles.yaml` and display it as a clean table:
 ```
 Client: Acme Corp (en)
 
-  Cloud:    azure (PPU subscription)
+  Cloud:    azure (acme-prod subscription)
   Database: postgresql via mcp [postgres]
   Git:      github as alice-dev (alice@acme.example)
   PM:       asana
