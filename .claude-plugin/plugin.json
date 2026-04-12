@@ -3,10 +3,12 @@
   "version": "0.1.0",
   "description": "Multi-workspace orchestration for developers who work across multiple clients. Identity isolation, knowledge graphs, temporal memory, and cross-workspace search.",
   "author": {
-    "name": "tentaqles",
+    "name": "Tentaqles",
+    "email": "reach@tentaqles.ai",
     "url": "https://github.com/tentaqles"
   },
-  "repository": "https://github.com/tentaqles/tentaqles",
+  "repository": "https://github.com/tentaqles/tentaqles-plugin",
+  "homepage": "https://github.com/tentaqles/tentaqles-plugin",
   "license": "MIT",
   "hooks": "./hooks/hooks.json"
 }

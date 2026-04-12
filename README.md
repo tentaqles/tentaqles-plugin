@@ -19,7 +19,7 @@ If you freelance, consult, or work across multiple client codebases, Tentaqles s
 ```bash
 # From the marketplace
 /plugin marketplace add tentaqles/tentaqles-plugin
-/plugin install tentaqles-plugin@tentaqles-tentaqles-plugin
+/plugin install tentaqles@tentaqles-tentaqles-plugin
 
 # Or test locally
 claude --plugin-dir /path/to/tentaqles-plugin
