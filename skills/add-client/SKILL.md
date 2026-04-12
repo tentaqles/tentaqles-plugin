@@ -49,14 +49,20 @@ Write the manifest file. Map the user's choices to the correct preflight command
 
 **Preflight commands by provider:**
 
-| Provider | Preflight command | Expected value field |
+| Provider | Preflight command | `expected_user` value |
 |----------|------------------|---------------------|
-| github | `gh auth status` | `expected_user: {username}` |
-| gitlab | `glab auth status` | `expected_user: {username}` |
-| azure-devops | `git config user.email` | (use email check only) |
-| azure (cloud) | `az account show --query name -o tsv` | `expected: {subscription_name}` |
-| aws (cloud) | `aws sts get-caller-identity --query Account --output text` | `expected: {account_id}` |
-| digitalocean | `doctl account get --format Email --no-header` | `expected: {email}` |
+| github | `gh auth status --active` | GitHub **username** (e.g. `tentaqles`) — NEVER the email |
+| gitlab | `glab auth status` | GitLab **username** — NEVER the email |
+| azure-devops | `git config user.email` | (leave `expected_user` unset — use email check only) |
+| azure (cloud) | `az account show --query name -o tsv` | — (use `cloud.expected: {subscription_name}`) |
+| aws (cloud) | `aws sts get-caller-identity --query Account --output text` | — (use `cloud.expected: {account_id}`) |
+| digitalocean | `doctl account get --format Email --no-header` | — (use `cloud.expected: {email}`) |
+
+**CRITICAL**: For `github` and `gitlab`, `expected_user` must be the CLI username returned by `gh auth status --active` (parsed from `account <name>`). It is NOT the email and NOT a display name. The auto-switch hook uses this value in `gh auth switch --user <expected_user>`. If you put the email here, the switch will always fail because no such account name exists.
+
+When asking the user for git identity, ask separately:
+  - "What's your git email?" → `git.email`
+  - "What's your GitHub/GitLab username?" → `git.user` AND `git.expected_user` (set both to the same value)
 
 **Blocked commands by provider** (safe defaults):
 
