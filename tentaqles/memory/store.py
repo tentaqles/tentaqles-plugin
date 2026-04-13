@@ -16,6 +16,23 @@ from typing import Literal
 
 import numpy as np
 
+try:
+    from tentaqles.privacy import redact_text as _redact_text
+except ImportError:  # pragma: no cover - graceful degradation
+    def _redact_text(text, strict=False, authorized_emails=None, audit_log_path=None):
+        return (text or "", [])
+
+
+def _redact(text):
+    """Safely redact a string, returning the original on any error."""
+    if text is None:
+        return text
+    try:
+        redacted, _ = _redact_text(text)
+        return redacted
+    except Exception:
+        return text
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS sessions (
     id          TEXT PRIMARY KEY,
@@ -158,9 +175,10 @@ class MemoryStore:
                 "INSERT OR IGNORE INTO sessions (id, started_at) VALUES (?, ?)",
                 ("untracked", _now()),
             )
+        safe_node_id = _redact(node_id)
         self._conn.execute(
             "INSERT INTO touches (session_id, node_id, node_type, touched_at, action, weight) VALUES (?, ?, ?, ?, ?, ?)",
-            (sid, node_id, node_type, _now(), action, weight),
+            (sid, safe_node_id, node_type, _now(), action, weight),
         )
         self._conn.commit()
 
@@ -174,7 +192,10 @@ class MemoryStore:
         tags: list[str] | None = None,
     ) -> str:
         did = _uid()
-        text = f"{chosen}. {rationale}"
+        safe_chosen = _redact(chosen)
+        safe_rationale = _redact(rationale)
+        safe_rejected = [_redact(r) for r in (rejected or [])]
+        text = f"{safe_chosen}. {safe_rationale}"
         embedding = self._embed(text)
         self._conn.execute(
             "INSERT INTO decisions (id, session_id, created_at, node_ids, chosen, rejected, rationale, confidence, embedding, tags) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -183,9 +204,9 @@ class MemoryStore:
                 self._active_session_id or "untracked",
                 _now(),
                 json.dumps(node_ids or []),
-                chosen,
-                json.dumps(rejected or []),
-                rationale,
+                safe_chosen,
+                json.dumps(safe_rejected),
+                safe_rationale,
                 confidence,
                 embedding,
                 json.dumps(tags or []),
@@ -210,9 +231,10 @@ class MemoryStore:
         priority: Literal["low", "medium", "high", "critical"] = "medium",
     ) -> str:
         pid = _uid()
+        safe_description = _redact(description)
         self._conn.execute(
             "INSERT INTO pending (id, session_id, created_at, description, node_ids, priority) VALUES (?, ?, ?, ?, ?, ?)",
-            (pid, self._active_session_id or "untracked", _now(), description, json.dumps(node_ids or []), priority),
+            (pid, self._active_session_id or "untracked", _now(), safe_description, json.dumps(node_ids or []), priority),
         )
         self._conn.commit()
         return pid
@@ -404,6 +426,162 @@ class MemoryStore:
             "open_pending": pending,
             "db_size_kb": round(self._db_path.stat().st_size / 1024, 1) if self._db_path.exists() else 0,
         }
+
+    # --- F1: PreCompact re-injection context ---
+
+    def get_compact_context(self, max_tokens: int = 600) -> str:
+        """Build a compact re-injection block for PreCompact hook.
+
+        Prioritizes: recent active decisions, hot nodes, open pending.
+        Truncates to roughly max_tokens * 4 chars.
+        """
+        lines: list[str] = ["## Workspace memory (re-injected)"]
+
+        # Last 3 active decisions
+        rows = self._conn.execute(
+            "SELECT chosen, rationale FROM decisions WHERE status='active' "
+            "ORDER BY created_at DESC LIMIT 3"
+        ).fetchall()
+        if rows:
+            lines.append("### Recent decisions")
+            for chosen, rationale in rows:
+                rat = (rationale or "")[:80]
+                lines.append(f"- {chosen}: {rat}")
+
+        # Top 5 hot nodes
+        try:
+            hot = self.get_active_nodes(5)
+        except Exception:
+            hot = []
+        if hot:
+            lines.append("### Hot nodes")
+            for n in hot:
+                lines.append(
+                    f"- {n['node_id']} (score {n['activity_score']}, {n['trend']})"
+                )
+
+        # Open pending (capped at 10)
+        try:
+            pending = self.get_open_pending()
+        except Exception:
+            pending = []
+        if pending:
+            lines.append(f"### Open items ({len(pending)})")
+            for p in pending[:10]:
+                lines.append(f"- [{p['priority']}] {p['description']}")
+
+        if len(lines) == 1:
+            lines.append("(no prior memory recorded)")
+
+        text = "\n".join(lines)
+        budget = max_tokens * 4
+        if len(text) > budget:
+            text = text[:budget] + "\n... (truncated)"
+        return text
+
+    # --- F3: enriched file/node history ---
+
+    def get_node_history_enriched(self, node_id: str, limit: int = 50) -> dict:
+        """Return touches joined with sessions plus related decisions."""
+        touch_rows = self._conn.execute(
+            """
+            SELECT t.session_id, t.touched_at, t.action, t.weight,
+                   s.summary, s.started_at, s.duration_s
+            FROM touches t
+            LEFT JOIN sessions s ON s.id = t.session_id
+            WHERE t.node_id = ?
+            ORDER BY t.touched_at DESC
+            LIMIT ?
+            """,
+            (node_id, limit),
+        ).fetchall()
+        touches = [
+            {
+                "session_id": r[0],
+                "touched_at": r[1],
+                "action": r[2],
+                "weight": r[3],
+                "session_summary": r[4],
+                "session_started_at": r[5],
+                "session_duration_s": r[6],
+            }
+            for r in touch_rows
+        ]
+
+        like_pattern = f"%{node_id}%"
+        decision_rows = self._conn.execute(
+            "SELECT id, created_at, chosen, rationale, confidence, node_ids "
+            "FROM decisions WHERE status='active' AND node_ids LIKE ? "
+            "ORDER BY created_at DESC",
+            (like_pattern,),
+        ).fetchall()
+        related = []
+        for did, created, chosen, rationale, confidence, node_ids_json in decision_rows:
+            try:
+                nids = json.loads(node_ids_json or "[]")
+            except (ValueError, TypeError):
+                nids = []
+            if node_id in nids:
+                related.append(
+                    {
+                        "id": did,
+                        "created_at": created,
+                        "chosen": chosen,
+                        "rationale": rationale,
+                        "confidence": confidence,
+                    }
+                )
+
+        return {
+            "node_id": node_id,
+            "touches": touches,
+            "related_decisions": related,
+        }
+
+    # --- F4: similar pending detection ---
+
+    def find_similar_pending(
+        self, description: str, similarity_threshold: float = 0.8
+    ) -> list[dict]:
+        """Return open pending items whose Jaccard token similarity exceeds threshold."""
+        import re as _re
+
+        def _tokens(s: str) -> set:
+            return {t for t in _re.split(r"\W+", (s or "").lower()) if t}
+
+        def _jaccard(a: set, b: set) -> float:
+            if not a and not b:
+                return 0.0
+            union = a | b
+            if not union:
+                return 0.0
+            return len(a & b) / len(union)
+
+        target = _tokens(description)
+        if not target:
+            return []
+
+        rows = self._conn.execute(
+            "SELECT id, created_at, description, node_ids, priority "
+            "FROM pending WHERE resolved_at IS NULL "
+            "ORDER BY created_at DESC LIMIT 50"
+        ).fetchall()
+
+        results = []
+        for r in rows:
+            sim = _jaccard(target, _tokens(r[2]))
+            if sim > similarity_threshold:
+                results.append(
+                    {
+                        "id": r[0],
+                        "created_at": r[1],
+                        "description": r[2],
+                        "node_ids": json.loads(r[3] or "[]"),
+                        "priority": r[4],
+                        "similarity": round(sim, 3),
+                    }
+                )
+        return results
 
     def close(self):
         self._conn.close()

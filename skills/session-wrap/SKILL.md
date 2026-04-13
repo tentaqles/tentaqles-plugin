@@ -84,6 +84,71 @@ echo '{"cwd": "{client_root}", "event": "touch", "data": {"node_id": "{relative_
 
 Use `weight: 2.0` for files that were debugged extensively or were the main focus. Use `weight: 0.5` for files that were only glanced at.
 
+## Detect and record skill corrections
+
+Scan the conversation for user corrections — moments where the user said "no",
+"actually", "remember for next time", "that's wrong", "correction:", or similar
+language that establishes a rule for future sessions or corrects your behavior.
+
+Examples of what counts as a correction:
+- "no, you should use RS256 not HS256 for JWT signing"
+- "actually, we always use conventional commits here"
+- "remember for next time: don't auto-install pip deps"
+- "that's wrong — the database uses port 5433 not 5432"
+- "correction: our staging env is called 'qa', not 'staging'"
+
+Non-corrections (do NOT record):
+- "thanks, looks good"
+- "can you also do X?"
+- "explain that again"
+- General questions or follow-ups
+
+For each detected correction:
+
+1. **Identify the target skill**: which skill does this correction apply to?
+   - If the user names the skill explicitly ("in build-graph, always...") → that skill
+   - If the correction is about a behavior that happened during a specific skill
+     invocation → that skill
+   - If the correction is about a general behavior during this session → `session-wrap`
+   - If unclear → ask the user briefly which skill it applies to, or default to the
+     skill most recently invoked in this session
+
+2. **Extract the correction text**: the specific rule or fact, phrased as an
+   instruction. Example transformations:
+   - User: "no you should use RS256 not HS256" → correction: "Use RS256 for JWT signing, not HS256"
+   - User: "actually we always use conventional commits" → correction: "Always use conventional commits"
+   - User: "remember: staging is called qa here" → correction: "The staging environment is called 'qa'"
+
+3. **Emit the event** via memory-bridge:
+
+   ```bash
+   echo '{"cwd": "{client_root}", "event": "skill_correction", "data": {"skill_name": "SKILL_NAME", "correction": "CORRECTION_TEXT"}}' | python "${CLAUDE_PLUGIN_ROOT}/scripts/memory-bridge.py"
+   ```
+
+   Where:
+   - `{client_root}` is the session's cwd (from the Detect Client Workspace step, or current directory)
+   - `SKILL_NAME` is the skill identified in step 1
+   - `CORRECTION_TEXT` is the rule extracted in step 2, properly escaped for JSON
+     (escape double quotes as `\"`, backslashes as `\\`)
+
+4. **Report back**: In the final session-wrap report, include a section listing
+   any corrections recorded. Example:
+   > **Corrections saved (2)**:
+   > - `build-graph`: Use RS256 for JWT signing, not HS256
+   > - `session-wrap`: Always use conventional commits
+
+### Guardrails
+
+- Only record **explicit** corrections — don't invent rules from general follow-up questions
+- If a user's correction contains sensitive data (API keys, passwords), the
+  privacy filter in memory-bridge.py will redact it automatically
+- The skill write is idempotent — running the same correction twice only records once
+- Corrections go to client-local skills (`{client_root}/.claude/skills/`) by default,
+  so they don't bleed across clients
+- Do NOT write to SKILL.md files directly from this skill — the `skill_correction`
+  event handler in memory-bridge.py delegates to `tentaqles/skills.py`
+  `record_skill_correction()`, which handles the file write safely
+
 ## Show Updated Context
 
 After saving, display the updated context summary so the user can verify:
@@ -104,6 +169,7 @@ Session saved for {client display_name}:
   Decisions: {N} recorded
   Pending: {N} items ({priorities})
   Files: {N} touched
+  Corrections: {N} recorded ({skill names})
 
 Next session will start with this context automatically.
 ```

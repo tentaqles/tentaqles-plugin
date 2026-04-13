@@ -2,10 +2,12 @@
 """Tentaqles memory bridge — wires hook events into the SQLite MemoryStore.
 
 Called from skills or standalone. Accepts JSON on stdin:
-    {"cwd": "...", "event": "touch|decision|session_start|session_end|pending|context", "data": {...}}
+    {"cwd": "...", "event": "touch|decision|session_start|session_end|pending|context|skill_correction", "data": {...}}
 
 Exits silently on any error to avoid breaking the hook chain.
 """
+
+from __future__ import annotations
 
 import os
 import sys
@@ -15,17 +17,29 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _path import setup_paths
 setup_paths()
 
-from __future__ import annotations
-
 import json
-import os
-import sys
+from pathlib import Path
 
 
 # Also add plugin data dir (where bootstrap installs extra deps)
 plugin_data = os.environ.get("CLAUDE_PLUGIN_DATA", "")
 if plugin_data:
     sys.path.insert(0, os.path.join(plugin_data, "lib"))
+
+
+try:
+    from tentaqles.privacy import redact_text
+
+    def _redact(text):
+        if text is None:
+            return None
+        try:
+            return redact_text(str(text))[0]
+        except Exception:
+            return text
+except Exception:
+    def _redact(text):
+        return text
 
 
 def main() -> None:
@@ -99,7 +113,7 @@ def _dispatch(
         print(json.dumps({"session_id": sid}))
 
     elif event == "session_end":
-        summary = data.get("summary", "")
+        summary = _redact(data.get("summary", ""))
         tags = data.get("tags")
 
         try:
@@ -141,10 +155,10 @@ def _dispatch(
     elif event == "decision":
         try:
             did = store.record_decision(
-                chosen=data.get("chosen", ""),
-                rationale=data.get("rationale", ""),
+                chosen=_redact(data.get("chosen", "")),
+                rationale=_redact(data.get("rationale", "")),
                 node_ids=data.get("node_ids"),
-                rejected=data.get("rejected"),
+                rejected=[_redact(r) for r in (data.get("rejected") or [])],
                 confidence=data.get("confidence", "medium"),
                 tags=data.get("tags"),
             )
@@ -157,7 +171,7 @@ def _dispatch(
 
     elif event == "pending":
         pid = store.add_pending(
-            description=data.get("description", ""),
+            description=_redact(data.get("description", "")),
             node_ids=data.get("node_ids"),
             priority=data.get("priority", "medium"),
         )
@@ -166,6 +180,31 @@ def _dispatch(
     elif event == "context":
         summary = store.get_context_summary()
         print(summary)
+
+    elif event == "skill_correction":
+        # Self-improving skills: record a user correction against a SKILL.md file
+        skill_name = data.get("skill_name", "")
+        correction = _redact(data.get("correction", ""))
+        if not skill_name or not correction:
+            print(json.dumps({"error": "skill_correction requires skill_name and correction"}), file=sys.stderr)
+            return
+
+        plugin_root = os.environ.get("CLAUDE_PLUGIN_ROOT", "")
+        if not plugin_root:
+            # Fall back: resolve from this script's location
+            plugin_root = str(Path(__file__).parent.parent)
+
+        try:
+            from tentaqles.skills import record_skill_correction
+            result = record_skill_correction(
+                skill_name=skill_name,
+                correction=correction,
+                plugin_root=plugin_root,
+                client_root=client_root,
+            )
+            print(json.dumps(result))
+        except Exception as exc:
+            print(json.dumps({"error": f"skill_correction failed: {exc}"}), file=sys.stderr)
 
     else:
         print(
