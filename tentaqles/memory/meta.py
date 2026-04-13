@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -29,6 +31,21 @@ CREATE TABLE IF NOT EXISTS workspace_status (
     session_count   INTEGER DEFAULT 0,
     total_touches   INTEGER DEFAULT 0
 );
+
+CREATE TABLE IF NOT EXISTS signals (
+    id              TEXT PRIMARY KEY,
+    from_workspace  TEXT NOT NULL,
+    to_workspace    TEXT NOT NULL,
+    event_type      TEXT NOT NULL,
+    payload         TEXT NOT NULL DEFAULT '{}',
+    message         TEXT,
+    emitted_at      TEXT NOT NULL,
+    expires_at      TEXT NOT NULL,
+    read_by         TEXT DEFAULT NULL,
+    read_at         TEXT DEFAULT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_signals_to ON signals(to_workspace, read_by, expires_at);
+CREATE INDEX IF NOT EXISTS idx_signals_from ON signals(from_workspace, emitted_at DESC);
 """
 
 
@@ -135,10 +152,41 @@ class MetaMemory:
             if nodes != "none":
                 lines.append(f"  Hot: {nodes}")
 
+        # Append cross-workspace patterns if patterns.json exists and is < 7 days old
+        try:
+            from tentaqles.config import data_dir
+            patterns_path = os.path.join(data_dir(), "metagraph", "patterns.json")
+            if (
+                os.path.exists(patterns_path)
+                and (time.time() - os.path.getmtime(patterns_path)) < 7 * 86400
+            ):
+                patterns = self.get_patterns()
+                if patterns:
+                    lines.append("\n## Cross-workspace patterns")
+                    for p in patterns[:5]:
+                        lines.append(
+                            f"- **{p.get('label', 'unknown')}** "
+                            f"({p.get('decision_count', 0)} decisions across "
+                            f"{len(p.get('workspaces', []))} workspaces)"
+                        )
+        except Exception:
+            pass
+
         text = "\n".join(lines)
         if len(text) > max_tokens * 4:
             text = text[: max_tokens * 4] + "\n..."
         return text
+
+    def get_pending_signals(self, workspace_id: str) -> list[dict]:
+        """Return unread, non-expired signals directed at workspace_id via SignalBus."""
+        from tentaqles.memory.signals import SignalBus
+        bus = SignalBus(_get_meta_db_path())
+        return bus.read_pending(workspace_id)
+
+    def get_patterns(self) -> list[dict]:
+        """Return cross-workspace patterns from patterns.json via CrossWorkspacePatternDetector."""
+        from tentaqles.memory.pattern_detector import CrossWorkspacePatternDetector
+        return CrossWorkspacePatternDetector().load_patterns()
 
     def close(self):
         self._conn.close()

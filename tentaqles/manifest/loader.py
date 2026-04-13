@@ -61,6 +61,7 @@ def get_client_context(cwd: str | Path) -> dict:
     manifest = load_manifest(cwd)
 
     if manifest is not None:
+        signals_raw = manifest.get("signals") or {}
         return {
             "client": manifest.get("client", "unknown"),
             "display_name": manifest.get("display_name", manifest.get("client", "unknown")),
@@ -72,6 +73,10 @@ def get_client_context(cwd: str | Path) -> dict:
             "git": _extract_section(manifest, "git"),
             "project_management": _extract_section(manifest, "project_management"),
             "stack": manifest.get("stack", []),
+            "signals": {
+                "enabled": bool(signals_raw.get("enabled", False)),
+                "subscribe_to": signals_raw.get("subscribe_to", []),
+            },
         }
 
     # Fallback: try client-registry.json

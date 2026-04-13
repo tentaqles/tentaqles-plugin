@@ -68,6 +68,52 @@ class EmbeddingService:
 
         return np.stack(results)
 
+    def embed_batch_from_db(
+        self,
+        conn,
+        table: str,
+        id_col: str,
+        text_col: str,
+        embedding_col: str,
+        batch_size: int = 32,
+    ) -> int:
+        """Embed rows from a SQLite table that are missing an embedding.
+
+        Reads rows where embedding_col IS NULL, embeds their text in batches
+        of batch_size, and writes the resulting float32 blobs back.
+
+        Args:
+            conn: Open sqlite3 connection.
+            table: Table to process.
+            id_col: Primary key column name.
+            text_col: Column whose text content should be embedded.
+            embedding_col: Column to write the embedding blob into.
+            batch_size: Number of texts to embed per model call.
+
+        Returns:
+            Number of rows embedded.
+        """
+        rows = conn.execute(
+            f"SELECT {id_col}, {text_col} FROM {table} WHERE {embedding_col} IS NULL AND {text_col} IS NOT NULL"
+        ).fetchall()
+
+        total = 0
+        for batch_start in range(0, len(rows), batch_size):
+            batch = rows[batch_start : batch_start + batch_size]
+            ids = [r[0] for r in batch]
+            texts = [r[1] for r in batch]
+            embeddings = self.embed(texts)  # (N, dim) float32
+            for row_id, vec in zip(ids, embeddings):
+                blob = vec.tobytes()
+                conn.execute(
+                    f"UPDATE {table} SET {embedding_col} = ? WHERE {id_col} = ?",
+                    (blob, row_id),
+                )
+            conn.commit()
+            total += len(batch)
+
+        return total
+
     def search(
         self,
         query: str,

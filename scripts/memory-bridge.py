@@ -154,7 +154,7 @@ def _dispatch(
 
     elif event == "decision":
         try:
-            did = store.record_decision(
+            result = store.record_decision_checked(
                 chosen=_redact(data.get("chosen", "")),
                 rationale=_redact(data.get("rationale", "")),
                 node_ids=data.get("node_ids"),
@@ -162,12 +162,30 @@ def _dispatch(
                 confidence=data.get("confidence", "medium"),
                 tags=data.get("tags"),
             )
-            print(json.dumps({"decision_id": did}))
+            result["decision_id"] = result.pop("id")  # backward compat key
+            print(json.dumps(result))
         except Exception as exc:
             print(
                 json.dumps({"error": f"record_decision failed: {exc}"}),
                 file=sys.stderr,
             )
+
+    elif event == "signal":
+        from tentaqles.memory.signals import SignalBus
+        bus = SignalBus()
+        sig_id = bus.emit(
+            from_workspace=data["from"],
+            to_workspace=data["to"],
+            event_type=data.get("type", "custom"),
+            message=data.get("message", ""),
+            payload=data.get("payload"),
+            ttl_hours=float(data.get("ttl_hours", 48.0)),
+        )
+        print(json.dumps({"signal_id": sig_id}))
+
+    elif event == "read_signals":
+        from tentaqles.memory.signals import SignalBus
+        print(json.dumps({"signals": SignalBus().read_pending(data["workspace_id"])}))
 
     elif event == "pending":
         pid = store.add_pending(
