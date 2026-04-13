@@ -7,3 +7,7 @@ build/
 *.db
 *.npz
 tentaqles-demo/
+
+# Local planning docs (not distributed)
+.planning/
+ROADMAP.md
