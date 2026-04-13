@@ -1,20 +1,40 @@
 # Tentaqles
 
-Multi-workspace orchestration for developers who work across multiple clients with AI coding assistants.
+> Multi-workspace orchestration for developers who work across multiple clients with AI coding assistants.
 
-## What it does
+Tentaqles is a Claude Code plugin that keeps identity, memory, and knowledge isolated per client while surfacing useful patterns across them. Built for freelancers, consultants, and anyone juggling more than one codebase at a time.
 
-If you freelance, consult, or work across multiple client codebases, Tentaqles solves five problems:
+**See [CHANGELOG.md](CHANGELOG.md) for release notes.**
 
-1. **Identity isolation** — Prevents pushing code with the wrong git email, running CLI commands against the wrong cloud subscription, or querying the wrong database. Preflight checks run automatically before every external operation, and the right account is auto-switched on session start.
+## Why
 
-2. **Persistent memory** — Tracks what you worked on, what decisions you made, and what's pending across sessions. When you return to a client after days away, the context is already there. Survives terminal close, Ctrl+C, `/exit`, and context auto-compaction.
+Working across multiple clients with an AI coding assistant creates failure modes that a single-project workflow never encounters: pushing code with the wrong git email, querying the wrong database, leaking one client's context into another's session, losing track of decisions made weeks ago in a different workspace. Tentaqles addresses these directly.
 
-3. **Cross-workspace search** — Builds knowledge graphs per client and connects them via semantic embeddings. Ask "have I solved this problem before?" and find the answer even if it was for a different client.
+## Features
 
-4. **Privacy-safe capture** — Every observation is scanned for secrets (API keys, JWTs, OAuth tokens, connection strings, private keys) before it touches disk. Cross-client email detection catches leakage between workspaces.
+**Identity isolation.** Prevents pushing code with the wrong git email, running CLI commands against the wrong cloud subscription, or querying the wrong database. Preflight checks run automatically before every external operation, and the right account is auto-switched on session start (git via `includeIf`, gh via `auth switch`, Azure via `account set`, DigitalOcean via `doctl auth switch`).
 
-5. **Self-improving skills** — When you correct the agent, the correction is recorded to the skill's own definition. Over time, each workspace's skills learn your patterns. Per-client, so one client's corrections never affect another.
+**Persistent temporal memory.** Tracks sessions, touches, decisions, and pending work per client in a local SQLite database. Survives terminal close, Ctrl+C, `/exit`, and context auto-compaction via a `PreCompact` hook that re-injects critical state.
+
+**Four-tier memory with decay.** Brain-inspired tiers — Working → Episodic → Semantic → Procedural — with Ebbinghaus decay and auto-eviction. Sessions auto-promote to Episodic on close; important facts climb over time via the `/tentaqles:compact-memory` skill or the `compaction-cron.py` script.
+
+**Contradiction detection.** When a new decision is recorded, it is embedded and compared against active decisions. If similarity exceeds 0.82 and the chosen text disagrees, the old decision is automatically superseded — the chain is preserved, queryable via `/tentaqles:decision-history` or `MemoryStore.get_decision_lineage()`.
+
+**Knowledge graphs with cross-workspace search.** Pluggable graph engine (graphify or native) builds per-client knowledge graphs and embeds every node with fastembed. A meta-graph merges concepts across clients while keeping source code isolated. Ask "have I solved this problem before?" and find answers from other engagements.
+
+**Cross-workspace pattern detection.** A weekly background job reads decisions from all registered workspaces (read-only), clusters them, and surfaces patterns that span two or more workspaces — for example, "you've solved JWT expiration three different ways across three clients." Results appear in the session preamble and via `/tentaqles:cross-patterns`.
+
+**Learned workspace profiles.** Each workspace grows an auto-generated profile — hot files, session frequency, top concepts — that is injected into the SessionStart preamble. No manual tagging required. Regenerates when stale (>7 days) or on demand via `/tentaqles:profile-refresh`.
+
+**Time-travel snapshots.** Before every identity auto-switch and every write to `.tentaqles.yaml`, the plugin captures an append-only JSON snapshot (manifest, memory stats, git identity). The last 30 are kept and pruned automatically. Restore any prior state interactively with `/tentaqles:rollback`.
+
+**Inter-workspace signals (opt-in pub/sub).** A small global table lets Workspace A emit a message to Workspace B that appears in B's next session preamble. 48-hour TTL, acknowledge-once, workspace-level payloads only (deploy failed, CI passed, PR merged) — never code or credentials. Opt-in per workspace via a `signals:` block in the manifest.
+
+**Privacy-safe capture.** Every observation is scanned for secrets — API keys, JWTs, OAuth tokens, connection strings, private keys, cross-client emails — before touching disk. Secrets are replaced with `[REDACTED:{pattern_name}]` in memory, dashboard output, and correction records.
+
+**Self-improving skills.** When you correct the agent, the correction is recorded to the skill's own definition at `{client_root}/.claude/skills/{name}/SKILL.md`. Per-client isolation — one client's corrections never affect another.
+
+**Real-time dashboard.** `http://localhost:8765` — a live grid of all workspaces with session counts, hot nodes, pending items, and trend indicators. Pure stdlib, self-contained HTML, works offline.
 
 ## Quick start
 
@@ -96,6 +116,11 @@ git:
   expected_user: my-github-user
 
 stack: [python, flask, postgresql]
+
+# Optional — inter-workspace signals (F12)
+signals:
+  enabled: true
+  subscribe_to: [dirtybird, acme-corp]
 ```
 
 Tentaqles will detect this file from any subfolder and enforce the correct identity.
@@ -185,6 +210,12 @@ Secrets are replaced with `[REDACTED:{pattern_name}]` in memory, dashboard outpu
 | `/tentaqles:file-history` | Show everything Tentaqles has recorded about a specific file |
 | `/tentaqles:dashboard` | Launch the real-time dashboard at localhost:8765 |
 | `/tentaqles:setup-demo` | Create mock client workspaces to explore the plugin safely |
+| `/tentaqles:compact-memory` | Manually trigger 4-tier memory consolidation and decay eviction |
+| `/tentaqles:decision-history` | Surface the supersession chain for a topic; show contradiction scores |
+| `/tentaqles:rollback` | List snapshots, preview one, and restore it interactively |
+| `/tentaqles:profile-refresh` | Regenerate the learned workspace profile from `memory.db` |
+| `/tentaqles:cross-patterns` | Display cross-workspace patterns detected by the pattern cron job |
+| `/tentaqles:emit-signal` | Emit an inter-workspace signal to one or more registered workspaces |
 
 ## Hooks
 

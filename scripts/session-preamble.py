@@ -86,6 +86,16 @@ def auto_switch_identity(manifest: dict, cwd: str) -> list[str]:
     cloud = manifest.get("cloud", {}) or {}
     client_root = manifest.get("_client_root", cwd) or cwd
 
+    # F9: capture snapshot before identity switch
+    try:
+        from tentaqles.snapshots.manager import SnapshotManager
+        SnapshotManager(client_root).capture(
+            reason="auto-switch",
+            manifest_data=manifest,
+        )
+    except Exception:
+        pass
+
     # --- Git identity via includeIf (works for any sub-repo under client_root) ---
     expected_email = git.get("email")
     expected_name = manifest.get("display_name")
@@ -174,6 +184,73 @@ def _get_temporal_context(cwd: str, context: dict) -> str:
 
         store = MemoryStore(client_root)
         summary = store.get_context_summary()
+
+        # F7: Semantic facts
+        try:
+            facts = store.get_semantic_facts(limit=5)
+            if facts:
+                facts_lines = ["## Semantic facts"] + [f"- {f['fact']}" for f in facts]
+                summary = summary + "\n\n" + "\n".join(facts_lines) if summary else "\n".join(facts_lines)
+        except Exception:
+            pass
+
+        # F10: Workspace profile
+        try:
+            from tentaqles.memory.profiler import WorkspaceProfiler
+            prof_manager = WorkspaceProfiler(store, client_root)
+            profile = prof_manager.load()
+            if profile is not None and not prof_manager.is_stale():
+                profile_lines = ["## Workspace profile"]
+                if profile.get("summary_sentence"):
+                    profile_lines.append(profile["summary_sentence"])
+                hot = profile.get("hot_files", [])[:3]
+                if hot:
+                    profile_lines.append("Hot files: " + ", ".join(h["path"] for h in hot))
+                concepts = profile.get("top_concepts", [])[:3]
+                if concepts:
+                    profile_lines.append("Concepts: " + ", ".join(c.get("label", "") for c in concepts if c.get("label")))
+                summary = summary + "\n\n" + "\n".join(profile_lines) if summary else "\n".join(profile_lines)
+            else:
+                # Profile missing or stale — regenerate inline with 5s timeout
+                import threading
+                regen_result = {}
+
+                def _regen():
+                    try:
+                        from tentaqles.memory.profiler import WorkspaceProfiler as _WP
+                        _WP(store, client_root).generate()
+                        regen_result["done"] = True
+                    except Exception:
+                        pass
+
+                t = threading.Thread(target=_regen, daemon=True)
+                t.start()
+                t.join(timeout=5)
+        except Exception:
+            pass
+
+        # F12: Incoming signals
+        try:
+            manifest_signals = context.get("signals", {})
+            if manifest_signals.get("enabled"):
+                client_name = context.get("client", "unknown")
+                from tentaqles.memory.signals import SignalBus
+                bus = SignalBus()
+                signals = bus.read_pending(client_name)
+                if signals:
+                    sig_lines = ["## Incoming signals"]
+                    for sig in signals:
+                        sig_lines.append(
+                            f"- [{sig['event_type']}] from {sig['from_workspace']}: {sig['message']}"
+                        )
+                        try:
+                            bus.acknowledge(sig["id"], client_name)
+                        except Exception:
+                            pass
+                    summary = summary + "\n\n" + "\n".join(sig_lines) if summary else "\n".join(sig_lines)
+        except Exception:
+            pass
+
         store.close()
         return summary
     except Exception:

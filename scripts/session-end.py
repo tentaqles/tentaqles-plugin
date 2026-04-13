@@ -281,6 +281,34 @@ def main():
         # End session with summary
         store.end_session(summary, tags=[reason, client_name])
 
+        # F7: memory consolidation
+        try:
+            from tentaqles.memory.consolidator import MemoryConsolidator
+            MemoryConsolidator(store).maybe_compact()
+        except Exception:
+            pass
+
+        # F10: workspace profile regen if stale
+        try:
+            from tentaqles.memory.profiler import WorkspaceProfiler
+            prof = WorkspaceProfiler(store, client_root)
+            if prof.is_stale():
+                prof.generate()
+        except Exception:
+            pass
+
+        # F11: cross-workspace pattern detection (async, >7d stale)
+        try:
+            import subprocess, sys as _sys, time
+            from tentaqles.config import data_dir
+            patterns_path = os.path.join(data_dir(), "metagraph", "patterns.json")
+            stale = (not os.path.exists(patterns_path)) or (time.time() - os.path.getmtime(patterns_path) > 7 * 86400)
+            if stale:
+                script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pattern-cron.py")
+                subprocess.Popen([_sys.executable, script], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+
         # Update meta-memory
         try:
             from tentaqles.memory.meta import MetaMemory
