@@ -25,6 +25,18 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
+try:
+    from tentaqles.privacy import redact_text
+except ImportError:
+    def redact_text(text):
+        return text, []
+
+try:
+    from tentaqles.threads import detect_open_threads, deduplicate_pending
+except ImportError:
+    detect_open_threads = None
+    deduplicate_pending = None
+
 
 
 def parse_transcript(transcript_path: str) -> dict:
@@ -198,6 +210,12 @@ def main():
 
     summary = build_summary(activity) if activity else f"Session ended ({reason})"
 
+    # Redact the summary before storing (strips secrets/tokens/keys)
+    try:
+        summary, _ = redact_text(summary)
+    except Exception:
+        pass
+
     # Save to memory
     try:
         from tentaqles.memory.store import MemoryStore
@@ -230,6 +248,35 @@ def main():
                     store.touch(fp, "file", "read", weight=0.5)
                 except Exception:
                     pass
+
+        # Detect open threads from transcript (F4) and record as pending items
+        if (
+            transcript_path
+            and Path(transcript_path).exists()
+            and detect_open_threads is not None
+            and deduplicate_pending is not None
+        ):
+            try:
+                candidates = detect_open_threads(transcript_path)
+                if candidates:
+                    try:
+                        existing = store.get_open_pending()
+                    except Exception:
+                        existing = []
+                    try:
+                        new_threads = deduplicate_pending(candidates, existing)
+                    except Exception:
+                        new_threads = candidates
+                    for thread in new_threads:
+                        try:
+                            store.add_pending(
+                                description=thread["description"],
+                                priority=thread.get("priority", "medium"),
+                            )
+                        except Exception:
+                            pass
+            except Exception:
+                pass  # Never crash session end because of thread detection
 
         # End session with summary
         store.end_session(summary, tags=[reason, client_name])

@@ -22,6 +22,12 @@ import os
 import re
 import sys
 
+try:
+    from tentaqles.privacy import redact_text
+except Exception:
+    def redact_text(text, **kwargs):
+        return (text, [])
+
 
 # Patterns that indicate a decision or discovery worth capturing
 DECISION_PATTERNS = [
@@ -133,6 +139,13 @@ def main() -> None:
         combined_text = command + "\n" + tool_output
     else:
         combined_text = tool_output
+
+    # Redact before scanning to ensure secrets don't match decision patterns
+    # or get extracted as file paths
+    try:
+        combined_text, _ = redact_text(combined_text)
+    except Exception:
+        pass
 
     if _has_decision_pattern(combined_text):
         # Extract file paths mentioned in the text
