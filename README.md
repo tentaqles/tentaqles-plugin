@@ -2,6 +2,26 @@
 
 Multi-workspace orchestration for developers who work across multiple clients with AI coding assistants.
 
+## What's new in v0.3 "Memory Matures"
+
+Six features that deepen how the plugin remembers, reasons about, and shares knowledge.
+
+**F7 — 4-tier memory consolidation with decay.** Brain-inspired tiers: Working → Episodic → Semantic → Procedural. Sessions auto-promote to Episodic on close; important facts climb to Semantic and Procedural over time. Ebbinghaus decay evicts stale entries automatically. New tables `semantic_memories` and `procedural_memories` in `memory.db`; new column `sessions.memory_tier`. Manual trigger: `/tentaqles:compact-memory`. Cron: `scripts/compaction-cron.py`.
+
+**F8 — Contradiction detection and supersession.** When you record a new decision, it is embedded and compared cosine-similarity against active decisions. If similarity > 0.82 and the text disagrees, the old decision is automatically superseded — the chain is preserved, not deleted. New column `decisions.contradiction_score`. Surface the full supersession chain for any topic with `/tentaqles:decision-history`. Programmatic access: `MemoryStore.get_decision_lineage(decision_id)`.
+
+**F9 — Time-travel snapshots.** Append-only JSON snapshots are written to `{workspace}/.claude/snapshots/{utc_iso}.json` — capturing the manifest, memory stats, and git identity at a point in time. Auto-fires on identity auto-switch and on any Write to `.tentaqles.yaml` (via `scripts/snapshot-guard.py` PreToolUse hook). The last 30 snapshots are kept; older ones are pruned automatically. Restore any snapshot interactively with `/tentaqles:rollback`.
+
+**F10 — Workspace profiles (learned, not declared).** The plugin auto-generates a profile from `memory.db` — hot files, session frequency, top concepts — and writes it to `{workspace}/.claude/profile.json`. It is injected into the SessionStart preamble as a `## Workspace profile` section. Profile regenerates automatically when it is more than 7 days old. Manual refresh: `/tentaqles:profile-refresh`.
+
+**F11 — Cross-workspace pattern detection.** A weekly background job reads decisions from all registered workspace `memory.db` files (READ-ONLY via `sqlite3` URI `?mode=ro`), embeds them, clusters them, and surfaces patterns that span two or more workspaces. Output lands in `{data_dir}/metagraph/patterns.json` and appears in the cross-workspace section of the session preamble via `MetaMemory.get_cross_workspace_context()`. Display patterns interactively with `/tentaqles:cross-patterns`. Cron: `scripts/pattern-cron.py`.
+
+**F12 — Inter-workspace signals (pub/sub).** A `signals` table in the GLOBAL `meta.db` (not per-workspace) lets Workspace A emit a message to Workspace B; B reads it on next session start. 48-hour TTL, acknowledge-once. Opt-in per workspace via `.tentaqles.yaml` (see schema below). Use cases: deploy failed, CI passed, PR merged — workspace-level events only, never code or credentials. Emit from a session with `/tentaqles:emit-signal`.
+
+**Numbers**: 60 → 238 tests. 0 new pip dependencies. 10 new modules, 4 new scripts, 6 new skills.
+
+---
+
 ## What it does
 
 If you freelance, consult, or work across multiple client codebases, Tentaqles solves five problems:
@@ -96,6 +116,11 @@ git:
   expected_user: my-github-user
 
 stack: [python, flask, postgresql]
+
+# Optional — inter-workspace signals (F12)
+signals:
+  enabled: true
+  subscribe_to: [dirtybird, acme-corp]
 ```
 
 Tentaqles will detect this file from any subfolder and enforce the correct identity.
@@ -185,6 +210,12 @@ Secrets are replaced with `[REDACTED:{pattern_name}]` in memory, dashboard outpu
 | `/tentaqles:file-history` | Show everything Tentaqles has recorded about a specific file |
 | `/tentaqles:dashboard` | Launch the real-time dashboard at localhost:8765 |
 | `/tentaqles:setup-demo` | Create mock client workspaces to explore the plugin safely |
+| `/tentaqles:compact-memory` | Manually trigger 4-tier memory consolidation and decay eviction |
+| `/tentaqles:decision-history` | Surface the supersession chain for a topic; show contradiction scores |
+| `/tentaqles:rollback` | List snapshots, preview one, and restore it interactively |
+| `/tentaqles:profile-refresh` | Regenerate the learned workspace profile from `memory.db` |
+| `/tentaqles:cross-patterns` | Display cross-workspace patterns detected by the pattern cron job |
+| `/tentaqles:emit-signal` | Emit an inter-workspace signal to one or more registered workspaces |
 
 ## Hooks
 

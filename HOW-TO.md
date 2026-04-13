@@ -19,6 +19,13 @@ Practical walkthroughs for using the plugin day to day. Assumes you've already i
 11. [Troubleshooting identity mismatches](#11-troubleshooting-identity-mismatches)
 12. [Recovering from a broken manifest](#12-recovering-from-a-broken-manifest)
 13. [Privacy: what's captured and what isn't](#13-privacy-what-is-captured-and-what-isnt)
+14. [Memory consolidation and decay](#14-memory-consolidation-and-decay)
+15. [Decision history and contradiction detection](#15-decision-history-and-contradiction-detection)
+16. [Time-travel snapshots and rollback](#16-time-travel-snapshots-and-rollback)
+17. [Workspace profiles](#17-workspace-profiles)
+18. [Cross-workspace pattern detection](#18-cross-workspace-pattern-detection)
+19. [Inter-workspace signals](#19-inter-workspace-signals)
+20. [Scheduled background jobs](#20-scheduled-background-jobs)
 
 ---
 
@@ -407,6 +414,298 @@ Not: casual questions, reformulations, or polite disagreement that doesn't set a
 - Cross-client email leaks (detected and redacted when `authorized_emails` is set in the manifest)
 
 **To audit redactions**, enable the audit log by setting an `audit_log_path` in the privacy section of your manifest (planned, not yet wired into config).
+
+---
+
+## 14. Memory consolidation and decay
+
+**What it is**: Tentaqles models memory across four tiers inspired by human memory research. Sessions start in **Working** and auto-promote to **Episodic** when they end. Over time, the consolidator extracts durable facts into **Semantic** (declarative knowledge, e.g. "this team always deploys on Fridays") and **Procedural** (how-to patterns, e.g. "migration steps for this client"). Facts that haven't been accessed or reinforced decay via Ebbinghaus scoring and are eventually evicted.
+
+**Normally automatic**: consolidation runs via `scripts/compaction-cron.py` (see section 20). The memory tier of each session is stored in `sessions.memory_tier` and you can see it in the dashboard or via `query-memory`.
+
+**Manual trigger**:
+
+```
+/tentaqles:compact-memory
+```
+
+The skill runs consolidation immediately for the current workspace, prints a summary of what was promoted, decayed, or evicted, and shows the resulting tier distribution.
+
+**Expected output**:
+
+```
+Memory consolidation complete (acme):
+  Promoted to episodic:   3 sessions
+  Promoted to semantic:   7 facts
+  Promoted to procedural: 2 patterns
+  Decayed / evicted:      4 stale entries
+
+Tier distribution:
+  working:    1   (current session)
+  episodic:  34
+  semantic:  22
+  procedural: 9
+```
+
+**Gotchas**:
+- Consolidation is per-workspace. Running it in one workspace does not affect others.
+- Semantic and Procedural entries live in `semantic_memories` and `procedural_memories` tables in `memory.db` — they are just as private and gitignored as the rest.
+- If `compaction-cron.py` is running on schedule, the manual trigger is additive — running it twice is safe (idempotent for promotion, not for decay timing).
+
+---
+
+## 15. Decision history and contradiction detection
+
+**What it is**: Every time you record a decision, the plugin embeds it and checks cosine similarity against all currently active decisions for the workspace. If a candidate scores above 0.82 similarity AND the text disagrees, the old decision is automatically superseded and the `contradiction_score` column is updated. The chain is preserved — nothing is deleted.
+
+**Viewing the supersession chain**:
+
+```
+/tentaqles:decision-history JWT signing algorithm
+```
+
+The skill embeds the topic query, finds the most relevant decision, and walks the full supersession chain from oldest to newest.
+
+**Expected output**:
+
+```
+Decision chain: JWT signing algorithm (acme)
+
+[superseded] 2025-11-03 — Use HS256 for simplicity
+  Rejected: RS256, ES256
+  Superseded by: dec_a3f2 (score: 0.91)
+
+[superseded] 2026-01-15 — Use RS256 for microservice arch
+  Rejected: HS256
+  Superseded by: dec_b7c1 (score: 0.88)
+
+[active]     2026-03-28 — Use RS256 with key rotation every 90 days
+  Rejected: HS256
+  Rationale: allows public-key verification in each service; rotation reduces blast radius
+```
+
+**Programmatic access**:
+
+```python
+from tentaqles.memory.store import MemoryStore
+store = MemoryStore("/path/to/workspace")
+chain = store.get_decision_lineage("dec_b7c1")
+```
+
+**Gotchas**:
+- The 0.82 threshold catches near-synonymous decisions but ignores genuinely different topics. If you record two unrelated decisions that happen to have high word overlap, inspect the chain with `/tentaqles:decision-history` to confirm no false supersession occurred.
+- `contradiction_score` is `NULL` on decisions recorded before v0.3. That's normal — the column is added by migration and old rows are not backfilled.
+
+---
+
+## 16. Time-travel snapshots and rollback
+
+**What snapshots contain**: Each snapshot is an append-only JSON file at `{workspace}/.claude/snapshots/{utc_iso}.json`. It captures the manifest contents, memory stats (session/decision/touch counts per tier), and the active git identity at the moment it was taken. It does NOT contain source code or full memory contents.
+
+**When snapshots fire automatically**:
+1. On every identity auto-switch at session start.
+2. On any Write to `.tentaqles.yaml` (via the `scripts/snapshot-guard.py` PreToolUse hook).
+
+The last 30 snapshots per workspace are retained. Older ones are pruned automatically on each write.
+
+**Listing and restoring**:
+
+```
+/tentaqles:rollback
+```
+
+Without arguments, the skill lists all available snapshots with timestamps and a one-line summary (memory stats + git email at that point).
+
+```
+/tentaqles:rollback 2026-03-15T09-22-04
+```
+
+With a timestamp prefix, the skill shows the full snapshot contents and asks you to confirm before restoring. Restoring writes the manifest back from the snapshot — it does NOT roll back `memory.db`.
+
+**Expected listing output**:
+
+```
+Snapshots for: acme (30 available)
+
+  2026-04-12T08-11-03  identity-switch  git=dev@acme.com  sessions=47 decisions=113
+  2026-04-10T14-55-19  manifest-write   git=dev@acme.com  sessions=46 decisions=111
+  2026-03-28T11-02-44  identity-switch  git=dev@acme.com  sessions=41 decisions=98
+  ...
+```
+
+**Gotchas**:
+- Snapshots are gitignored by default (`.claude/snapshots/` is in the default `.gitignore` scaffold).
+- Restoring a manifest snapshot does not undo `memory.db` changes. If you need to roll back memory, use the backup approach in section 12.
+- The snapshot directory is created lazily on first write — it will not exist until the first auto-switch or manifest edit.
+
+---
+
+## 17. Workspace profiles
+
+**What it is**: A learned profile generated from `memory.db`, written to `{workspace}/.claude/profile.json`. It summarises: hot files (by decay-weighted touch score), session frequency, and top concepts (most-connected nodes in the knowledge graph, if one exists). It is injected automatically into every SessionStart preamble under a `## Workspace profile` heading.
+
+**When it regenerates**: automatically when the profile is more than 7 days old. You will see a note in the preamble: `Profile refreshed.`
+
+**Manual refresh**:
+
+```
+/tentaqles:profile-refresh
+```
+
+Forces an immediate regeneration regardless of age. Useful after a big sprint where the hot files have changed significantly.
+
+**Expected preamble injection**:
+
+```
+## Workspace profile
+Hot files (decay-weighted):
+  src/auth.py        1.00  (last touched: today)
+  src/models/user.py 0.83
+  tests/test_auth.py 0.71
+
+Session frequency: 4.2 sessions/week (last 30d)
+
+Top concepts: authentication, JWT, user-model, rate-limiting
+```
+
+**Gotchas**:
+- `profile.json` is gitignored by default. It is derived data and can be regenerated at any time.
+- If no knowledge graph has been built for the workspace, the "Top concepts" section is omitted.
+- Profile generation reads `memory.db` directly — it does not require an active session.
+
+---
+
+## 18. Cross-workspace pattern detection
+
+**What it is**: A background job (`scripts/pattern-cron.py`) loads decisions from all registered workspace `memory.db` files, embeds them, clusters them, and writes patterns that span two or more workspaces to `{data_dir}/metagraph/patterns.json`. The session preamble includes a cross-workspace context section when patterns exist (`MetaMemory.get_cross_workspace_context()`).
+
+All reads of remote `memory.db` files use the SQLite URI `?mode=ro` — the job never writes to another workspace's database.
+
+**Viewing detected patterns**:
+
+```
+/tentaqles:cross-patterns
+```
+
+The skill reads `patterns.json` and prints each cluster with the workspaces it spans, representative decisions, and a suggested generalization.
+
+**Expected output**:
+
+```
+Cross-workspace patterns (last run: 2026-04-10)
+
+Pattern 1 — Authentication strategy
+  Workspaces: acme, globex
+  Decisions:  "RS256 with 90-day rotation" (acme), "RS256 preferred for API tokens" (globex)
+  Suggestion: Consider a shared JWT standards doc across both clients.
+
+Pattern 2 — Database migration approach
+  Workspaces: acme, dirtybird
+  Decisions:  "Alembic for migrations" (acme), "Alembic preferred over manual SQL" (dirtybird)
+  Suggestion: You default to Alembic across multiple clients — worth codifying in a shared runbook.
+```
+
+**Gotchas**:
+- Patterns only appear after the cron job has run at least once. Running it manually: `python scripts/pattern-cron.py`.
+- The job reads across ALL registered workspaces. If a workspace `memory.db` is on a different machine or drive that is not mounted, the job skips it and logs a warning — it does not fail.
+- Cross-workspace patterns are a read-only view. No data moves between workspace databases.
+
+---
+
+## 19. Inter-workspace signals
+
+**What it is**: A lightweight pub/sub mechanism backed by a `signals` table in the GLOBAL `meta.db`. Workspace A emits a signal addressed to B; B reads it on next session start and sees it in the preamble. Signals have a 48-hour TTL and are acknowledge-once (reading a signal marks it consumed for that workspace).
+
+Signals are designed for workspace-level events — deploy failed, CI passed, PR merged. They must never carry code, credentials, or client-confidential data.
+
+**Opting in**: add a `signals` block to `.tentaqles.yaml`:
+
+```yaml
+signals:
+  enabled: true
+  subscribe_to: [dirtybird, acme-corp]
+```
+
+`subscribe_to` lists the workspace slugs whose signals you want to receive. Without this block, the workspace neither emits nor receives signals.
+
+**Emitting a signal from a session**:
+
+```
+/tentaqles:emit-signal
+```
+
+The skill asks for: target workspace, signal type (deploy_failed / ci_passed / pr_merged / custom), and a short message (max 280 chars). All content passes through the privacy filter before being written.
+
+**Example interaction**:
+
+```
+You: /tentaqles:emit-signal
+Plugin: Target workspace slug: dirtybird
+You: dirtybird
+Plugin: Signal type [deploy_failed / ci_passed / pr_merged / custom]: deploy_failed
+You: deploy_failed
+Plugin: Message (280 chars max): acme staging deploy failed — migration 0042 errored
+You: acme staging deploy failed — migration 0042 errored
+Plugin: Signal emitted. Dirtybird will see it on next session start (TTL: 48h).
+```
+
+**What the receiver sees** (in their next preamble):
+
+```
+Signals (1 unread):
+  [deploy_failed] from acme — 2h ago
+  "acme staging deploy failed — migration 0042 errored"
+  (acknowledged on read)
+```
+
+**Gotchas**:
+- Signals are stored in the GLOBAL `meta.db`, not in any per-workspace `memory.db`. The isolation boundary is at the storage layer: no workspace database is accessed by another workspace.
+- A workspace will only receive signals from workspaces listed in its `subscribe_to`. The sender does not need to list the receiver.
+- If a signal is not read within 48 hours it expires automatically. Signals are not retried.
+- Disable signals entirely by removing the `signals` block from the manifest (or setting `enabled: false`).
+
+---
+
+## 20. Scheduled background jobs
+
+Two Python scripts support long-running background work. Neither requires a running Claude Code session.
+
+### Memory compaction (`scripts/compaction-cron.py`)
+
+Runs 4-tier consolidation and Ebbinghaus decay across all registered workspaces. Promotes sessions to episodic, extracts semantic and procedural memories, and evicts stale entries.
+
+**Run manually**:
+
+```bash
+python scripts/compaction-cron.py
+```
+
+**Schedule with cron (Linux/macOS)**:
+
+```
+0 3 * * * cd /path/to/tentaqles-plugin && python scripts/compaction-cron.py >> ~/.claude/logs/compaction.log 2>&1
+```
+
+**Schedule with Task Scheduler (Windows)**: point the action to `python` with argument `C:\path\to\scripts\compaction-cron.py`.
+
+**Recommended cadence**: daily, during off-hours. Running it more often is safe but not useful.
+
+### Cross-workspace pattern detection (`scripts/pattern-cron.py`)
+
+Loads decisions from all registered workspaces (read-only), clusters them, and writes `{data_dir}/metagraph/patterns.json`.
+
+**Run manually**:
+
+```bash
+python scripts/pattern-cron.py
+```
+
+**Recommended cadence**: weekly. Pattern detection is computationally heavier (embeddings for every decision across all workspaces) — running it daily is fine but rarely produces meaningfully different output.
+
+**Both scripts**:
+- Write logs to stdout (redirect to a file if scheduling via cron or Task Scheduler)
+- Exit non-zero on hard failure, zero on success or skipped-workspace warnings
+- Do not require or modify `.tentaqles.yaml` — they read the plugin's workspace registry directly
 
 ---
 
