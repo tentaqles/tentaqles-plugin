@@ -179,7 +179,9 @@ class MemoryStore:
     def end_session(self, summary: str, tags: list[str] | None = None) -> dict:
         sid = self._active_session_id
         if not sid:
-            return {"error": "no active session"}
+            # Lazy upsert: allow end_session without a prior start_session
+            # (first-run wrap-up, orphaned session after compact, etc.)
+            sid = self.start_session(tags=tags, metadata={})
         now = _now()
         row = self._conn.execute("SELECT started_at, tags FROM sessions WHERE id = ?", (sid,)).fetchone()
         if not row:
