@@ -164,7 +164,7 @@ Write `CLAUDE.md` at the workspace root:
 
 ```bash
 # Load tentaqles runtime
-_tqe="${CLAUDE_PLUGIN_ROOT:-}"; [ -z "$_tqe" ] && for _d in "$HOME/.claude/plugins/cache/tentaqles/tentaqles"/*/; do [ -f "${_d}plugin.json" ] && _tqe="${_d%/}" && break; done; . "$_tqe/scripts/tq_env.sh" 2>/dev/null || true
+_tqe="${CLAUDE_PLUGIN_ROOT:-}"; [ -z "$_tqe" ] && for _d in "$HOME/.claude/plugins/cache"/*/tentaqles/*/; do [ -f "${_d}.claude-plugin/plugin.json" ] && _tqe="${_d%/}" && break; done; . "$_tqe/scripts/tq_env.sh" 2>/dev/null || true
 
 "$TENTAQLES_PY" -c "
 from tentaqles.metagraph.config import register_workspace
@@ -185,7 +185,7 @@ git config user.name "{user_display_name}"
 
 ```bash
 # Load tentaqles runtime
-_tqe="${CLAUDE_PLUGIN_ROOT:-}"; [ -z "$_tqe" ] && for _d in "$HOME/.claude/plugins/cache/tentaqles/tentaqles"/*/; do [ -f "${_d}plugin.json" ] && _tqe="${_d%/}" && break; done; . "$_tqe/scripts/tq_env.sh" 2>/dev/null || true
+_tqe="${CLAUDE_PLUGIN_ROOT:-}"; [ -z "$_tqe" ] && for _d in "$HOME/.claude/plugins/cache"/*/tentaqles/*/; do [ -f "${_d}.claude-plugin/plugin.json" ] && _tqe="${_d%/}" && break; done; . "$_tqe/scripts/tq_env.sh" 2>/dev/null || true
 
 "$TENTAQLES_PY" -c "
 from tentaqles.manifest.loader import load_manifest, run_preflight_checks, format_context_summary, get_client_context

@@ -11,7 +11,7 @@ View and modify any field in the current client's `.tentaqles.yaml` manifest. Th
 
 ```bash
 # Load tentaqles runtime
-_tqe="${CLAUDE_PLUGIN_ROOT:-}"; [ -z "$_tqe" ] && for _d in "$HOME/.claude/plugins/cache/tentaqles/tentaqles"/*/; do [ -f "${_d}plugin.json" ] && _tqe="${_d%/}" && break; done; . "$_tqe/scripts/tq_env.sh" 2>/dev/null || true
+_tqe="${CLAUDE_PLUGIN_ROOT:-}"; [ -z "$_tqe" ] && for _d in "$HOME/.claude/plugins/cache"/*/tentaqles/*/; do [ -f "${_d}.claude-plugin/plugin.json" ] && _tqe="${_d%/}" && break; done; . "$_tqe/scripts/tq_env.sh" 2>/dev/null || true
 
 "$TENTAQLES_PY" -c "
 import os
@@ -73,7 +73,7 @@ Read the current `.tentaqles.yaml`, modify the relevant field(s), write it back.
 
 ```bash
 # Load tentaqles runtime
-_tqe="${CLAUDE_PLUGIN_ROOT:-}"; [ -z "$_tqe" ] && for _d in "$HOME/.claude/plugins/cache/tentaqles/tentaqles"/*/; do [ -f "${_d}plugin.json" ] && _tqe="${_d%/}" && break; done; . "$_tqe/scripts/tq_env.sh" 2>/dev/null || true
+_tqe="${CLAUDE_PLUGIN_ROOT:-}"; [ -z "$_tqe" ] && for _d in "$HOME/.claude/plugins/cache"/*/tentaqles/*/; do [ -f "${_d}.claude-plugin/plugin.json" ] && _tqe="${_d%/}" && break; done; . "$_tqe/scripts/tq_env.sh" 2>/dev/null || true
 
 "$TENTAQLES_PY" -c "
 import os, yaml
@@ -138,7 +138,7 @@ Run preflight checks to verify the new settings work:
 
 ```bash
 # Load tentaqles runtime
-_tqe="${CLAUDE_PLUGIN_ROOT:-}"; [ -z "$_tqe" ] && for _d in "$HOME/.claude/plugins/cache/tentaqles/tentaqles"/*/; do [ -f "${_d}plugin.json" ] && _tqe="${_d%/}" && break; done; . "$_tqe/scripts/tq_env.sh" 2>/dev/null || true
+_tqe="${CLAUDE_PLUGIN_ROOT:-}"; [ -z "$_tqe" ] && for _d in "$HOME/.claude/plugins/cache"/*/tentaqles/*/; do [ -f "${_d}.claude-plugin/plugin.json" ] && _tqe="${_d%/}" && break; done; . "$_tqe/scripts/tq_env.sh" 2>/dev/null || true
 
 "$TENTAQLES_PY" -c "
 import os

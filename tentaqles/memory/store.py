@@ -187,6 +187,8 @@ class MemoryStore:
         if not row:
             return {"error": "session not found"}
         started = datetime.fromisoformat(row[0])
+        if started.tzinfo is None:
+            started = started.replace(tzinfo=timezone.utc)
         duration = int((datetime.now(timezone.utc) - started).total_seconds())
         existing_tags = json.loads(row[1] or "[]")
         all_tags = list(set(existing_tags + (tags or [])))

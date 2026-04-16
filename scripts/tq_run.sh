@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # Tentaqles plugin script runner — resolves interpreter + deps, then exec's.
-# Usage: sh tq_run.sh scripts/memory-bridge.py [args...]
-#   or:  sh tq_run.sh memory-bridge.py [args...]
+# Usage: bash tq_run.sh memory-bridge.py [args...]
+#   or:  bash tq_run.sh scripts/memory-bridge.py [args...]
 #
 # Automatically finds the right Python, sets PYTHONPATH, and installs
 # deps on first run — so hooks/skills never depend on bare `python`.
 
-_self_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# Resolve own directory (POSIX-safe: no array subscript on BASH_SOURCE)
+_this="${BASH_SOURCE:-$0}"
+_self_dir="$(cd "$(dirname "$_this")" && pwd)"
 export CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$(dirname "$_self_dir")}"
 
 # shellcheck source=tq_env.sh
