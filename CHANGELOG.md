@@ -2,6 +2,27 @@
 
 All notable changes to the Tentaqles plugin. Versions follow [semver](https://semver.org/).
 
+## [0.3.1] — 2026-04-16 — "Portable Runtime"
+
+Fixes plugin breakage on machines where `python` on PATH resolves to a broken venv shim or a venv missing plugin dependencies.
+
+### Added
+
+- **`scripts/tq_env.sh`** — bash runtime bootstrap that resolves `CLAUDE_PLUGIN_ROOT` (env var → `$BASH_SOURCE` → filesystem search of `~/.claude/plugins/cache/`), finds a working Python interpreter (`py -3` → `python3` → `python`, validated via `sys.executable`), exports `PYTHONPATH` with plugin root + lib dir, and runs `bootstrap.py` if core deps are missing. Idempotent — skips if already resolved.
+- **`scripts/tq_run.sh`** — thin wrapper: sources `tq_env.sh`, then exec's the target script with the resolved interpreter. Used by all hooks.
+- **Touch event acknowledgment.** The `touch` handler in `memory-bridge.py` now prints `{"touch_id": "..."}` on success, matching `decision` and `pending` handler behavior.
+
+### Fixed
+
+- **`session_end` without prior `session_start`.** `MemoryStore.end_session()` now auto-creates a session if none is active (lazy upsert), fixing "no active session" errors on first-run wrap-up and orphaned sessions after compaction.
+- **All 17 skills** updated to use `"$TENTAQLES_PY"` instead of bare `python` and `PYTHONPATH` instead of inline `sys.path.insert(0, os.environ.get('CLAUDE_PLUGIN_ROOT', '.'))` hacks. Each bash block gets a 2-line prelude sourcing `tq_env.sh`.
+- **`hooks/hooks.json`** updated: all hook commands use `sh tq_run.sh <script>` instead of `python <script>`.
+- **`networkx`** added as a transitive dependency (required by embedding service via `graphify_hook.py`).
+
+### Breaking
+
+None. All changes are backward compatible — if `CLAUDE_PLUGIN_ROOT` is set by the harness, it is used; the fallback only fires when it isn't.
+
 ## [0.3.0] — 2026-04-13 — "Memory Matures"
 
 Six architectural features that deepen how the plugin remembers, reasons about, and shares knowledge across workspaces.
