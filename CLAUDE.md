@@ -26,7 +26,7 @@ tests/                  pytest suite
 
 ## Runtime contract
 
-**Skills** invoke Python through `tq_env.sh` (sourced at the top of each bash block). **Hooks** use bare `python` because the Claude Code harness expands `${CLAUDE_PLUGIN_ROOT}` and invokes directly — `sh` wrappers cause "cannot execute binary file" on Windows. The skill bootstrap chain:
+**Both hooks and skills** invoke Python through `tq_run.sh` → `tq_env.sh`. Hooks use `bash "${CLAUDE_PLUGIN_ROOT}/scripts/tq_run.sh"` (not `sh` — that causes "cannot execute binary file" on Windows; not bare `python` — that doesn't exist on macOS). The bootstrap chain:
 
 1. `tq_env.sh` resolves `CLAUDE_PLUGIN_ROOT` (env → `$BASH_SOURCE` → filesystem search)
 2. Probes interpreters: `py -3` → `python3` → `python`, validated via `sys.executable`
