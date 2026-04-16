@@ -16,7 +16,7 @@ Fixes plugin breakage on machines where `python` on PATH resolves to a broken ve
 
 - **`session_end` without prior `session_start`.** `MemoryStore.end_session()` now auto-creates a session if none is active (lazy upsert), fixing "no active session" errors on first-run wrap-up and orphaned sessions after compaction.
 - **All 17 skills** updated to use `"$TENTAQLES_PY"` instead of bare `python` and `PYTHONPATH` instead of inline `sys.path.insert(0, os.environ.get('CLAUDE_PLUGIN_ROOT', '.'))` hacks. Each bash block gets a 2-line prelude sourcing `tq_env.sh`.
-- **`hooks/hooks.json`** updated: all hook commands use `sh tq_run.sh <script>` instead of `python <script>`.
+- **`hooks/hooks.json`** unchanged (hooks use `python` which the Claude Code harness resolves correctly; `tq_run.sh` is for skill bash blocks and manual invocations only).
 - **`networkx`** added as a transitive dependency (required by embedding service via `graphify_hook.py`).
 
 ### Breaking

@@ -231,7 +231,7 @@ All hooks are automatic and run silently.
 | `PostToolUse` | After Bash/Edit/Write | `knowledge-capture.py` — scan output for decisions, record file touches |
 | `SessionEnd` | Session ends (any reason) | `session-end.py` — parse transcript, detect open threads, save summary to memory |
 
-All hooks are invoked via `scripts/tq_run.sh`, which sources `tq_env.sh` to resolve the Python interpreter before exec'ing the target script. This ensures hooks work regardless of what `python` on PATH points to.
+Hooks use the `python` resolved by the Claude Code harness. Skills use `tq_env.sh` to independently resolve a working Python interpreter, bypassing broken venv shims on PATH.
 
 ## CLI
 
